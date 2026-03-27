@@ -16,6 +16,15 @@ void fenceAround(Instruction &I) {
   Builder.CreateFence(AtomicOrdering::SequentiallyConsistent);
 }
 
+bool isSeqFence(const Instruction& I) {
+  if (I.getOpcode() != Instruction::Fence) return false;
+  if (const auto *FI = dyn_cast<FenceInst>(&I)) {
+    const auto& order = FI->getOrdering();
+    return order == AtomicOrdering::SequentiallyConsistent;
+  }
+  return false;
+}
+
 // This method implements what the pass does
 bool visitor(Function &F) {
   bool changed = false;
@@ -30,18 +39,16 @@ bool visitor(Function &F) {
     }
   }
 
-  // for (auto &BB : F) {
-  //   for (auto &I : BB) {
-  //     if (I.getOpcode() == Instruction::Fence) {
-  //       if (const auto *FI = dyn_cast<FenceInst>(&I)) {
-  //         const auto& order = FI->getOrdering();
-  //         if (order == AtomicOrdering::SequentiallyConsistent) {
-  //           errs() << "fence, ordering: SeqCst\n";
-  //         }
-  //       }
-  //     }
-  //   }
-  // }
+  for (auto &BB : F) {
+    for (auto &I : BB) {
+      Instruction *next = I.getNextNode();
+      if (next == nullptr) continue;
+      if (isSeqFence(I) && isSeqFence(*next)) {
+        next->eraseFromParent();
+        changed = true;
+      }
+    }
+  }
 
   return changed;
 }

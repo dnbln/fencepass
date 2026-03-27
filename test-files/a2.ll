@@ -12,12 +12,9 @@ entry:
   fence seq_cst
   store i32 %a, ptr %a.addr, align 4
   fence seq_cst
-  fence seq_cst
   store i32 %b, ptr %b.addr, align 4
   fence seq_cst
-  fence seq_cst
   store i32 0, ptr %n, align 4
-  fence seq_cst
   fence seq_cst
   %0 = load i32, ptr %a.addr, align 4
   fence seq_cst
@@ -27,7 +24,6 @@ entry:
 if.then:                                          ; preds = %entry
   fence seq_cst
   %1 = load i32, ptr %a.addr, align 4
-  fence seq_cst
   fence seq_cst
   store i32 %1, ptr %n, align 4
   fence seq_cst
@@ -43,7 +39,6 @@ if.else:                                          ; preds = %entry
 if.then2:                                         ; preds = %if.else
   fence seq_cst
   %3 = load i32, ptr %a.addr, align 4
-  fence seq_cst
   fence seq_cst
   %4 = load i32, ptr %b.addr, align 4
   fence seq_cst
