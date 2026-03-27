@@ -1,5 +1,5 @@
-; ModuleID = 'a2.bc'
-source_filename = "a.c"
+; ModuleID = '../test-files/a2.bc'
+source_filename = "../test-files/a.c"
 target datalayout = "e-m:o-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-n32:64-S128-Fn32"
 target triple = "arm64-apple-macosx26.0.0"
 
@@ -43,7 +43,6 @@ if.then2:                                         ; preds = %if.else
   %4 = load i32, ptr %b.addr, align 4
   fence seq_cst
   %add = add nsw i32 %3, %4
-  fence seq_cst
   store i32 %add, ptr %n, align 4
   fence seq_cst
   br label %if.end
