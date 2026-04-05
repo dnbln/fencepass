@@ -3,6 +3,8 @@
 #include "llvm/Support/raw_ostream.h"
 
 #include <llvm/IR/IRBuilder.h>
+#include <llvm/Analysis/AliasAnalysis.h>
+#include <llvm/Analysis/AliasAnalysisEvaluator.h>
 
 using namespace llvm;
 
@@ -40,12 +42,14 @@ namespace {
     }
 
     // This method implements what the pass does
-    bool visitor(Function &F) {
+    bool visitor(Function &F, FunctionAnalysisManager &FAM) {
+        AAResults& results = FAM.getResult<AAManager>(F);
+
         bool changed = false;
         for (auto &BB: F) {
             for (auto &I: BB) {
                 if (isMemoryAccess(I)) {
-                    fenceAround(I);
+                    insertFenceAfter(I);
                     changed = true;
                 }
             }
@@ -126,8 +130,8 @@ namespace {
     struct FencePass : PassInfoMixin<FencePass> {
         // Main entry point, takes IR unit to run the pass on (&F) and the
         // corresponding pass manager (to be queried if need be)
-        PreservedAnalyses run(Function &F, FunctionAnalysisManager &) {
-            const bool changed = visitor(F);
+        PreservedAnalyses run(Function &F, FunctionAnalysisManager &FAM) {
+            const bool changed = visitor(F, FAM);
             return changed ? PreservedAnalyses::none() : PreservedAnalyses::all();
         }
 
@@ -149,6 +153,7 @@ llvm::PassPluginLibraryInfo getFencePassPluginInfo() {
                 [](StringRef Name, FunctionPassManager &FPM,
                    ArrayRef<PassBuilder::PipelineElement>) {
                     if (Name == "FencePass") {
+                        FPM.addPass(AAEvaluator());
                         FPM.addPass(FencePass());
                         return true;
                     }
