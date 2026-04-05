@@ -6,10 +6,10 @@ target triple = "arm64-apple-macosx26.0.0"
 ; Function Attrs: noinline nounwind optnone ssp uwtable(sync)
 define i32 @f(i32 noundef %a, i32 noundef %b) #0 {
 entry:
+  fence seq_cst
   %a.addr = alloca i32, align 4
   %b.addr = alloca i32, align 4
   %n = alloca i32, align 4
-  fence seq_cst
   store i32 %a, ptr %a.addr, align 4
   fence seq_cst
   store i32 %b, ptr %b.addr, align 4

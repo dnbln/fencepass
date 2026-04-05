@@ -7,12 +7,21 @@
 using namespace llvm;
 
 namespace {
-    void fenceAround(Instruction &I) {
+    void insertFenceBefore(Instruction &I) {
         IRBuilder Builder(I.getContext());
         Builder.SetInsertPoint(&I);
         Builder.CreateFence(AtomicOrdering::SequentiallyConsistent);
+    }
+
+    void insertFenceAfter(Instruction &I) {
+        IRBuilder Builder(I.getContext());
         Builder.SetInsertPoint(I.getNextNode());
         Builder.CreateFence(AtomicOrdering::SequentiallyConsistent);
+    }
+
+    void fenceAround(Instruction &I) {
+        insertFenceBefore(I);
+        insertFenceAfter(I);
     }
 
     bool isSeqFence(const Instruction &I) {
@@ -53,14 +62,14 @@ namespace {
             }
         }
 
-        
+
         bool fixpoint = false;
         while (!fixpoint) {
             fixpoint = true;
             for (auto &BB: F) {
-                for (BasicBlock::iterator I = BB.begin(); I != BB.end(); ++I) {
+                for (auto I = BB.begin(); I != BB.end(); ++I) {
                     if (!isSeqFence(*I)) { continue; }
-                    BasicBlock::iterator next = I;
+                    auto next = I;
                     ++next;
                     bool anyMemoryAccess = false;
                     while (next != BB.end()) {
@@ -79,6 +88,37 @@ namespace {
             }
         }
 
+        fixpoint = false;
+        while (!fixpoint) {
+            fixpoint = true;
+            for (auto &BB: F) {
+                BasicBlock::iterator loopNext;
+                for (auto I = BB.begin(); I != BB.end(); I = loopNext) {
+                    loopNext = I;
+                    ++loopNext;
+                    if (!isSeqFence(*I)) continue;
+                    auto next = I;
+                    if (next == BB.begin()) continue;
+                    do {
+                        --next;
+                    } while (next != BB.begin() && !isMemoryAccess(*next));
+                    auto afterNext = next;
+                    ++afterNext;
+                    if (afterNext == I) continue;
+                    if (isMemoryAccess(*next)) {
+                        I->removeFromParent();
+                        insertFenceAfter(*next);
+                        changed = true;
+                        fixpoint = false;
+                    } else if (next == BB.begin()) {
+                        I->removeFromParent();
+                        insertFenceBefore(*next);
+                        changed = true;
+                        fixpoint = false;
+                    }
+                }
+            }
+        }
         return changed;
     }
 
