@@ -16,21 +16,20 @@ entry:
   store i32 0, ptr %n, align 4
   fence seq_cst
   %0 = load i32, ptr %a.addr, align 4
-  fence seq_cst
   %cmp = icmp eq i32 %0, 2
+  fence seq_cst
   br i1 %cmp, label %if.then, label %if.else
 
 if.then:                                          ; preds = %entry
   %1 = load i32, ptr %a.addr, align 4
   fence seq_cst
   store i32 %1, ptr %n, align 4
-  fence seq_cst
   br label %if.end3
 
 if.else:                                          ; preds = %entry
   %2 = load i32, ptr %b.addr, align 4
-  fence seq_cst
   %cmp1 = icmp eq i32 %2, 3
+  fence seq_cst
   br i1 %cmp1, label %if.then2, label %if.end
 
 if.then2:                                         ; preds = %if.else
@@ -40,15 +39,14 @@ if.then2:                                         ; preds = %if.else
   fence seq_cst
   %add = add nsw i32 %3, %4
   store i32 %add, ptr %n, align 4
-  fence seq_cst
   br label %if.end
 
 if.end:                                           ; preds = %if.then2, %if.else
   br label %if.end3
 
 if.end3:                                          ; preds = %if.end, %if.then
-  %5 = load i32, ptr %n, align 4
   fence seq_cst
+  %5 = load i32, ptr %n, align 4
   ret i32 %5
 }
 
@@ -57,7 +55,6 @@ define i32 @main() #0 {
 entry:
   %retval = alloca i32, align 4
   store i32 0, ptr %retval, align 4
-  fence seq_cst
   %call = call i32 @f(i32 noundef 2, i32 noundef 3)
   ret i32 %call
 }
