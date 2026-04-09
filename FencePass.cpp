@@ -138,7 +138,8 @@ namespace fencepass {
                     continue;
                 }
                 currentPath.visited_basic_blocks.insert(succ);
-                floodPaths(alias_analysis_results, initial_value, map, currentPath, succ, succ->begin(),
+                CFPath cpClone = currentPath;
+                floodPaths(alias_analysis_results, initial_value, map, cpClone, succ, succ->begin(),
                            fenceWithStore);
                 currentPath.visited_basic_blocks.erase(succ);
             }
