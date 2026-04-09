@@ -12,7 +12,6 @@ entry:
   store i32 %a, ptr %a.addr, align 4
   store i32 %b, ptr %b.addr, align 4
   store i32 0, ptr %n, align 4
-  fence seq_cst
   %0 = load i32, ptr %a.addr, align 4
   %cmp = icmp eq i32 %0, 2
   br i1 %cmp, label %if.then, label %if.else

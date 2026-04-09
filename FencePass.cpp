@@ -134,7 +134,8 @@ namespace fencepass {
         CFPath &currentPath,
         BasicBlock *bb,
         BasicBlock::iterator bbIter,
-        const bool fenceWithStore) {
+        const bool fenceWithStore,
+        const bool fenceWithLoad) {
         if (bbIter == bb->end()) {
             for (const auto succ: successors(bb)) {
                 if (currentPath.visited_basic_blocks.find(succ) != currentPath.visited_basic_blocks.end()) {
@@ -145,7 +146,7 @@ namespace fencepass {
                 currentPath.visited_basic_blocks.insert(succ);
                 CFPath cpClone = currentPath;
                 floodPaths(alias_analysis_results, initial_value, map, cpClone, succ, succ->begin(),
-                           fenceWithStore);
+                           fenceWithStore, fenceWithLoad);
                 currentPath.visited_basic_blocks.erase(succ);
             }
             return;
@@ -167,13 +168,15 @@ namespace fencepass {
             switch (kind) {
                 case Load:
                 case AtomicRMW:
-                    if (doCommitByAAResult(alias_analysis_results.alias(initial_value, newValue)))
+                    if (fenceWithLoad
+                        && doCommitByAAResult(alias_analysis_results.alias(initial_value, newValue))) {
                         map.commitPath(currentPath);
+                    }
                     break;
                 case Store:
-                    if (fenceWithStore) {
-                        if (doCommitByAAResult(alias_analysis_results.alias(initial_value, newValue)))
-                            map.commitPath(currentPath);
+                    if (fenceWithStore
+                        && doCommitByAAResult(alias_analysis_results.alias(initial_value, newValue))) {
+                        map.commitPath(currentPath);
                     }
                     break;
             }
@@ -189,7 +192,8 @@ namespace fencepass {
             currentPath,
             bb,
             bbIter,
-            fenceWithStore);
+            fenceWithStore,
+            fenceWithLoad);
     }
 
     Map runCFAnalysis(
@@ -206,9 +210,10 @@ namespace fencepass {
 
                 if (kind == AtomicRMW) continue;
 
-                bool fenceWithStore = true;
-                if (kind == Store && allowStoreStoreReordering) {
-                    fenceWithStore = false;
+                bool fenceWithStore = true, fenceWithLoad = true;
+                if (kind == Store) {
+                    fenceWithStore = !allowStoreStoreReordering;
+                    fenceWithLoad = false;
                 }
 
                 auto current = CFPath{{}, {}};
@@ -223,7 +228,8 @@ namespace fencepass {
                     current,
                     &BB,
                     passedIt,
-                    fenceWithStore);
+                    fenceWithStore,
+                    fenceWithLoad);
             }
         }
         return map;
