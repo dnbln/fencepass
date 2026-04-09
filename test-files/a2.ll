@@ -26,8 +26,8 @@ if.then:                                          ; preds = %entry
 if.else:                                          ; preds = %entry
   fence seq_cst
   %2 = load i32, ptr %b.addr, align 4
-  fence seq_cst
   %cmp1 = icmp eq i32 %2, 3
+  fence seq_cst
   br i1 %cmp1, label %if.then2, label %if.end
 
 if.then2:                                         ; preds = %if.else
