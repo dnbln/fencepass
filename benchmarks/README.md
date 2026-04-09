@@ -66,7 +66,7 @@ Compiled at `-O1`. Fence counts reflect the pass output after redundancy elimina
 | Benchmark | Mem accesses (IR) | Fences inserted | Instructions before | Instructions after |
 |---|---|---|---|---|
 | bubblesort | 5 | 11 | 60 | 71 |
-| fibonacci | 6 | 10 | 37 | 47 |
+ fibonacci | 6 | 10 | 37 | 47 |
 | linked_list | 4 | 8 | 37 | 45 |
 | matrix_mul | 4 | 9 | 69 | 78 |
 | quicksort | 5 | 12 | 53 | 65 |
