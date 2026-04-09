@@ -14,8 +14,8 @@ entry:
   store i32 0, ptr %n, align 4
   fence seq_cst
   %0 = load i32, ptr %a.addr, align 4
-  %cmp = icmp eq i32 %0, 2
   fence seq_cst
+  %cmp = icmp eq i32 %0, 2
   br i1 %cmp, label %if.then, label %if.else
 
 if.then:                                          ; preds = %entry
@@ -27,10 +27,10 @@ if.then:                                          ; preds = %entry
 if.else:                                          ; preds = %entry
   %2 = load i32, ptr %b.addr, align 4
   %cmp1 = icmp eq i32 %2, 3
-  fence seq_cst
   br i1 %cmp1, label %if.then2, label %if.end
 
 if.then2:                                         ; preds = %if.else
+  fence seq_cst
   %3 = load i32, ptr %a.addr, align 4
   fence seq_cst
   %4 = load i32, ptr %b.addr, align 4

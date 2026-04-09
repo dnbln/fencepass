@@ -53,7 +53,7 @@ namespace fencepass {
     class MemAccess {
     public:
         MemAccessKind kind;
-        Value *ptr{};
+        Value *ptr;
     };
 
     bool operator<(const MemAccess &lhs, const MemAccess &rhs) {
@@ -73,103 +73,6 @@ namespace fencepass {
             return {Load, I.getOperand(0)};
         errs() << "Unsupported memory access instruction: " << I.getOpcodeName();
         return {Load, nullptr};
-    }
-
-    class BBFenceInfo {
-    public:
-        Instruction *fenceBeforeFirstMemAccess = nullptr;
-        Instruction *firstMemAccessInst = nullptr;
-        Instruction *fenceAfterLastMemAccess = nullptr;
-        Instruction *lastMemAccessInst = nullptr;
-        bool anySeqFence = false;
-
-        [[nodiscard]] bool hasAnyMemAccess() const { return firstMemAccessInst != nullptr; }
-        [[nodiscard]] MemAccess firstMemAccess() const { return memAccessFromInstruction(*firstMemAccessInst); }
-        [[nodiscard]] MemAccess lastMemAccess() const { return memAccessFromInstruction(*lastMemAccessInst); }
-    };
-
-    class BBFenceCompositesInfo {
-    public:
-        std::set<MemAccess> forward;
-    };
-
-    class BBFenceInfoMap {
-    public:
-        std::unordered_map<BasicBlock *, BBFenceInfo> bbfences{};
-        std::unordered_map<BasicBlock *, BBFenceCompositesInfo> bbfenceComposites{};
-    };
-
-    void runCompositeAnalysis(BBFenceInfoMap &M, Function &F) {
-        bool fixpoint = false;
-        while (!fixpoint) {
-            fixpoint = true;
-
-            for (auto &BB: F) {
-                // forward
-                for (auto succ = succ_begin(&BB); succ != succ_end(&BB); ++succ) {
-                    if (M.bbfences[*succ].hasAnyMemAccess()) {
-                        MemAccess ma = M.bbfences[*succ].firstMemAccess();
-                        if (auto &bbf = M.bbfenceComposites[&BB].forward; bbf.find(ma) == bbf.end()) {
-                            bbf.insert(ma);
-                            fixpoint = false;
-                        }
-                        continue;
-                    }
-
-                    auto &bbf = M.bbfenceComposites[&BB].forward;
-
-                    for (auto &ma: M.bbfenceComposites[*succ].forward) {
-                        if (bbf.find(ma) == bbf.end()) {
-                            bbf.insert(ma);
-                            fixpoint = false;
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    BBFenceInfoMap runFenceInfoAnalysis(Function &F) {
-        BBFenceInfoMap bbfences{};
-
-        for (auto &BB: F) {
-            Instruction *sawFence = nullptr;
-            Instruction *sawFenceBeforeFirstMemAccess = nullptr;
-            bool anySeqFence = false;
-            Instruction *firstMemAccessInst = nullptr;
-            Instruction *lastMemAccessInst = nullptr;
-            for (auto &I: BB) {
-                if (isSeqFence(I)) {
-                    sawFence = &I;
-                    anySeqFence = true;
-                    continue;
-                }
-
-                if (isMemoryAccess(I)) {
-                    lastMemAccessInst = &I;
-                    if (firstMemAccessInst == nullptr) {
-                        firstMemAccessInst = lastMemAccessInst;
-                        sawFenceBeforeFirstMemAccess = sawFence;
-                    }
-                    sawFence = nullptr;
-                }
-            }
-
-            bbfences.bbfences[&BB] = {
-                sawFenceBeforeFirstMemAccess,
-                firstMemAccessInst,
-                sawFence,
-                lastMemAccessInst,
-                anySeqFence,
-            };
-            bbfences.bbfenceComposites[&BB] = {
-                {}
-            };
-        }
-
-        runCompositeAnalysis(bbfences, F);
-
-        return bbfences;
     }
 
     struct CFPath {
@@ -323,26 +226,6 @@ namespace fencepass {
         AAResults &results = FAM.getResult<AAManager>(F);
 
         bool changed = false;
-        // for (auto &BB: F) {
-        //     for (auto &I: BB) {
-        //         if (isMemoryAccess(I)) {
-        //             insertFenceAfter(I);
-        //             changed = true;
-        //         }
-        //     }
-        // }
-        //
-        // for (auto &BB: F) {
-        //     for (auto &I: BB) {
-        //         Instruction *next = I.getNextNode();
-        //         if (next == nullptr) continue;
-        //         if (isSeqFence(I) && isSeqFence(*next)) {
-        //             next->eraseFromParent();
-        //             changed = true;
-        //         }
-        //     }
-        // }
-
 
         while (true) {
             Map bbfences = runCFAnalysis(F, allowStoreStoreReordering, results);
@@ -356,61 +239,6 @@ namespace fencepass {
             insertFenceBefore(*fp);
             changed = true;
         }
-        // while (!fixpoint) {
-        //     fixpoint = true;
-        //     for (auto &BB: F) {
-        //         for (auto I = BB.begin(); I != BB.end(); ++I) {
-        //             if (!isSeqFence(*I)) { continue; }
-        //             auto next = I;
-        //             ++next;
-        //             bool anyMemoryAccess = false;
-        //             while (next != BB.end()) {
-        //                 if (isSeqFence(*next)) break;
-        //                 if (isMemoryAccess(*next)) anyMemoryAccess = true;
-        //                 ++next;
-        //             }
-        //
-        //             if (next == BB.end() || anyMemoryAccess) continue;
-        //
-        //             next->removeFromParent();
-        //
-        //             fixpoint = false;
-        //             changed = true;
-        //         }
-        //     }
-        // }
-
-        // fixpoint = false;
-        // while (!fixpoint) {
-        //     fixpoint = true;
-        //     for (auto &BB: F) {
-        //         BasicBlock::iterator loopNext;
-        //         for (auto I = BB.begin(); I != BB.end(); I = loopNext) {
-        //             loopNext = I;
-        //             ++loopNext;
-        //             if (!isSeqFence(*I)) continue;
-        //             auto next = I;
-        //             if (next == BB.begin()) continue;
-        //             do {
-        //                 --next;
-        //             } while (next != BB.begin() && !isMemoryAccess(*next));
-        //             auto afterNext = next;
-        //             ++afterNext;
-        //             if (afterNext == I) continue;
-        //             if (isMemoryAccess(*next)) {
-        //                 I->removeFromParent();
-        //                 insertFenceAfter(*next);
-        //                 changed = true;
-        //                 fixpoint = false;
-        //             } else if (next == BB.begin()) {
-        //                 I->removeFromParent();
-        //                 insertFenceBefore(*next);
-        //                 changed = true;
-        //                 fixpoint = false;
-        //             }
-        //         }
-        //     }
-        // }
         return changed;
     }
 
