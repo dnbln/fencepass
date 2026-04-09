@@ -28,10 +28,11 @@ compile_ir() {
   "$CLANG" -x ir "$ir" -O0 -o "$out" 2>/dev/null
 }
 
+# $1 = output binary, $2 = plugin .so, $3 = pass name (FencePassTSO|FencePassPSO), $4 = input IR
 compile_with_pass() {
-  local out="$1" plugin="$2" ir="$3"
-  local patched="$TMP/$(basename "$ir" .ll)_$(basename "$plugin" .so).ll"
-  "$OPT" -load-pass-plugin "$plugin" -passes=FencePass "$ir" -S -o "$patched" 2>/dev/null
+  local out="$1" plugin="$2" pass="$3" ir="$4"
+  local patched="$TMP/$(basename "$ir" .ll)_${pass}_$(basename "$plugin" .so).ll"
+  "$OPT" -load-pass-plugin "$plugin" -passes="$pass" "$ir" -S -o "$patched" 2>/dev/null
   compile_ir "$out" "$patched"
 }
 
@@ -47,23 +48,29 @@ measure_cpu_ms() {
   printf "%.3f" "$(echo "scale=6; $val / 1000000" | bc)"
 }
 
-printf "%-20s %14s %14s %14s\n" "Benchmark" "Baseline(ms)" "FencePass(ms)" "Naive(ms)"
-printf "%-20s %14s %14s %14s\n" "---------" "------------" "-------------" "---------"
+printf "%-20s %14s %14s %14s %14s\n" \
+  "Benchmark" "Baseline(ms)" "TSO(ms)" "PSO(ms)" "Naive(ms)"
+printf "%-20s %14s %14s %14s %14s\n" \
+  "---------" "------------" "-------" "-------" "---------"
 
 for ir in "$IR_DIR"/*.ll; do
   name="$(basename "$ir" .ll)"
 
   bin_base="$TMP/${name}_base"
-  bin_main="$TMP/${name}_main"
+  bin_tso="$TMP/${name}_tso"
+  bin_pso="$TMP/${name}_pso"
   bin_naive="$TMP/${name}_naive"
 
-  compile_ir "$bin_base" "$ir"
-  compile_with_pass "$bin_main" "$PLUGIN_MAIN" "$ir"
-  compile_with_pass "$bin_naive" "$PLUGIN_NAIVE" "$ir"
+  compile_ir        "$bin_base"  "$ir"
+  compile_with_pass "$bin_tso"   "$PLUGIN_MAIN"  FencePassTSO "$ir"
+  compile_with_pass "$bin_pso"   "$PLUGIN_MAIN"  FencePassPSO "$ir"
+  compile_with_pass "$bin_naive" "$PLUGIN_NAIVE" FencePass    "$ir"
 
-  t_base=$(measure_cpu_ms "$bin_base")
-  t_main=$(measure_cpu_ms "$bin_main")
+  t_base=$(measure_cpu_ms  "$bin_base")
+  t_tso=$(measure_cpu_ms   "$bin_tso")
+  t_pso=$(measure_cpu_ms   "$bin_pso")
   t_naive=$(measure_cpu_ms "$bin_naive")
 
-  printf "%-20s %14s %14s %14s\n" "$name" "$t_base" "$t_main" "$t_naive"
+  printf "%-20s %14s %14s %14s %14s\n" \
+    "$name" "$t_base" "$t_tso" "$t_pso" "$t_naive"
 done
