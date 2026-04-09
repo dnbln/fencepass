@@ -173,17 +173,33 @@ namespace fencepass {
     }
 
     struct CFPath {
+        // blocks visited, except for the block containing the instruction we started from
         std::set<BasicBlock *> visited_basic_blocks;
         std::vector<Instruction *> path;
     };
 
     struct Map {
         std::map<Instruction *, int> map;
+
+        void increment(Instruction *I) {
+            if (map.find(I) == map.end()) {
+                map[I] = 1;
+            } else {
+                map[I]++;
+            }
+        }
+
+        void commitPath(const CFPath &path) {
+            for (const auto &I: path.path) {
+                increment(I);
+            }
+        }
     };
 
     void printMap(const Map &map) {
         auto &e = errs();
 
+        e << "Map: \n";
         for (const auto &[fst, snd]: map.map) {
             e << "Before instruction : " << *fst << ", Count: " << snd << "\n";
         }
@@ -209,16 +225,17 @@ namespace fencepass {
         Map &map,
         CFPath &currentPath,
         BasicBlock *bb,
-        Instruction *base,
         BasicBlock::iterator bbIter,
         bool fenceWithStore) {
         if (bbIter == bb->end()) {
             for (const auto succ: successors(bb)) {
                 if (currentPath.visited_basic_blocks.find(succ) != currentPath.visited_basic_blocks.end()) {
+                    // if we didnt find any conflicts the first time going through this block, we sure won't find any
+                    // conflicts going through it a second time.
                     continue;
                 }
                 currentPath.visited_basic_blocks.insert(succ);
-                floodPaths(alias_analysis_results, initial_value, map, currentPath, succ, nullptr, succ->begin(),
+                floodPaths(alias_analysis_results, initial_value, map, currentPath, succ, succ->begin(),
                            fenceWithStore);
                 currentPath.visited_basic_blocks.erase(succ);
             }
@@ -231,7 +248,9 @@ namespace fencepass {
             return;
         }
 
-        currentPath.path.emplace_back(&I);
+        if (I.getOpcode() != Instruction::PHI) {
+            currentPath.path.emplace_back(&I);
+        }
 
         if (isMemoryAccess(I)) {
             auto [kind, _] = memAccessFromInstruction(I);
@@ -239,21 +258,11 @@ namespace fencepass {
             switch (kind) {
                 case Load:
                 case AtomicRMW:
-                    for (auto &item: currentPath.path) {
-                        if (map.map.find(item) == map.map.end())
-                            map.map[item] = 1;
-                        else
-                            map.map[item] = map.map[item] + 1;
-                    }
+                    map.commitPath(currentPath);
                     break;
                 case Store:
                     if (fenceWithStore) {
-                        for (auto &item: currentPath.path) {
-                            if (map.map.find(item) == map.map.end())
-                                map.map[item] = 1;
-                            else
-                                map.map[item] = map.map[item] + 1;
-                        }
+                        map.commitPath(currentPath);
                     }
                     break;
             }
@@ -268,7 +277,6 @@ namespace fencepass {
             map,
             currentPath,
             bb,
-            &I,
             bbIter,
             fenceWithStore);
     }
@@ -303,7 +311,6 @@ namespace fencepass {
                     map,
                     current,
                     &BB,
-                    &I,
                     passedIt,
                     fenceWithStore);
             }
@@ -312,7 +319,7 @@ namespace fencepass {
     }
 
     // This method implements what the pass does
-    bool visitor(Function &F, FunctionAnalysisManager &FAM) {
+    bool visitor(Function &F, FunctionAnalysisManager &FAM, bool allowStoreStoreReordering) {
         AAResults &results = FAM.getResult<AAManager>(F);
 
         bool changed = false;
@@ -338,9 +345,9 @@ namespace fencepass {
 
 
         while (true) {
-            Map bbfences = runCFAnalysis(F, false, results);
+            Map bbfences = runCFAnalysis(F, allowStoreStoreReordering, results);
 
-            auto fp = fencePoint(bbfences);
+            const auto fp = fencePoint(bbfences);
 
             if (fp == nullptr) {
                 break;
@@ -409,10 +416,15 @@ namespace fencepass {
 
     // New PM implementation
     struct FencePass : PassInfoMixin<FencePass> {
+        bool allowStoreStoreReordering;
+
+        FencePass(bool allowStoreStoreReordering) : allowStoreStoreReordering(allowStoreStoreReordering) {
+        }
+
         // Main entry point, takes IR unit to run the pass on (&F) and the
         // corresponding pass manager (to be queried if need be)
         PreservedAnalyses run(Function &F, FunctionAnalysisManager &FAM) {
-            const bool changed = visitor(F, FAM);
+            const bool changed = visitor(F, FAM, allowStoreStoreReordering);
             return changed ? PreservedAnalyses::none() : PreservedAnalyses::all();
         }
 
@@ -433,11 +445,18 @@ llvm::PassPluginLibraryInfo getFencePassPluginInfo() {
             PB.registerPipelineParsingCallback(
                 [](StringRef Name, FunctionPassManager &FPM,
                    ArrayRef<PassBuilder::PipelineElement>) {
-                    if (Name == "FencePass") {
+                    if (Name == "FencePassTSO") {
                         FPM.addPass(AAEvaluator());
-                        FPM.addPass(fencepass::FencePass());
+                        FPM.addPass(fencepass::FencePass(false));
                         return true;
                     }
+
+                    if (Name == "FencePassPSO") {
+                        FPM.addPass(AAEvaluator());
+                        FPM.addPass(fencepass::FencePass(true));
+                        return true;
+                    }
+
                     return false;
                 });
         }
