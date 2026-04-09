@@ -2,28 +2,18 @@
 #include "llvm/Passes/PassPlugin.h"
 #include "llvm/Support/raw_ostream.h"
 
-#include <llvm/Analysis/AliasAnalysis.h>
-#include <llvm/Analysis/AliasAnalysisEvaluator.h>
 #include <llvm/IR/IRBuilder.h>
 
 using namespace llvm;
 
 namespace {
-void insertFenceBefore(Instruction &I) {
+
+void fenceAround(Instruction &I) {
   IRBuilder Builder(I.getContext());
   Builder.SetInsertPoint(&I);
   Builder.CreateFence(AtomicOrdering::SequentiallyConsistent);
-}
-
-void insertFenceAfter(Instruction &I) {
-  IRBuilder Builder(I.getContext());
   Builder.SetInsertPoint(I.getNextNode());
   Builder.CreateFence(AtomicOrdering::SequentiallyConsistent);
-}
-
-void fenceAround(Instruction &I) {
-  insertFenceBefore(I);
-  insertFenceAfter(I);
 }
 
 bool isSeqFence(const Instruction &I) {
@@ -36,21 +26,15 @@ bool isSeqFence(const Instruction &I) {
   return false;
 }
 
-bool isMemoryAccess(const Instruction &I) {
-  return I.getOpcode() == Instruction::Store ||
-         I.getOpcode() == Instruction::AtomicRMW ||
-         I.getOpcode() == Instruction::Load;
-}
-
 // This method implements what the pass does
-bool visitor(Function &F, FunctionAnalysisManager &FAM) {
-  AAResults &results = FAM.getResult<AAManager>(F);
-
+bool visitor(Function &F) {
   bool changed = false;
   for (auto &BB : F) {
     for (auto &I : BB) {
-      if (isMemoryAccess(I)) {
-        insertFenceAfter(I);
+      if (I.getOpcode() == Instruction::Store ||
+          I.getOpcode() == Instruction::AtomicRMW ||
+          I.getOpcode() == Instruction::Load) {
+        fenceAround(I);
         changed = true;
       }
     }
@@ -68,70 +52,6 @@ bool visitor(Function &F, FunctionAnalysisManager &FAM) {
     }
   }
 
-  bool fixpoint = false;
-  while (!fixpoint) {
-    fixpoint = true;
-    for (auto &BB : F) {
-      for (auto I = BB.begin(); I != BB.end(); ++I) {
-        if (!isSeqFence(*I)) {
-          continue;
-        }
-        auto next = I;
-        ++next;
-        bool anyMemoryAccess = false;
-        while (next != BB.end()) {
-          if (isSeqFence(*next))
-            break;
-          if (isMemoryAccess(*next))
-            anyMemoryAccess = true;
-          ++next;
-        }
-
-        if (next == BB.end() || anyMemoryAccess)
-          continue;
-
-        next->removeFromParent();
-
-        fixpoint = false;
-        changed = true;
-      }
-    }
-  }
-
-  fixpoint = false;
-  while (!fixpoint) {
-    fixpoint = true;
-    for (auto &BB : F) {
-      BasicBlock::iterator loopNext;
-      for (auto I = BB.begin(); I != BB.end(); I = loopNext) {
-        loopNext = I;
-        ++loopNext;
-        if (!isSeqFence(*I))
-          continue;
-        auto next = I;
-        if (next == BB.begin())
-          continue;
-        do {
-          --next;
-        } while (next != BB.begin() && !isMemoryAccess(*next));
-        auto afterNext = next;
-        ++afterNext;
-        if (afterNext == I)
-          continue;
-        if (isMemoryAccess(*next)) {
-          I->removeFromParent();
-          insertFenceAfter(*next);
-          changed = true;
-          fixpoint = false;
-        } else if (next == BB.begin()) {
-          I->removeFromParent();
-          insertFenceBefore(*next);
-          changed = true;
-          fixpoint = false;
-        }
-      }
-    }
-  }
   return changed;
 }
 
@@ -139,8 +59,8 @@ bool visitor(Function &F, FunctionAnalysisManager &FAM) {
 struct FencePass : PassInfoMixin<FencePass> {
   // Main entry point, takes IR unit to run the pass on (&F) and the
   // corresponding pass manager (to be queried if need be)
-  PreservedAnalyses run(Function &F, FunctionAnalysisManager &FAM) {
-    const bool changed = visitor(F, FAM);
+  PreservedAnalyses run(Function &F, FunctionAnalysisManager &) {
+    const bool changed = visitor(F);
     return changed ? PreservedAnalyses::none() : PreservedAnalyses::all();
   }
 
@@ -161,7 +81,6 @@ llvm::PassPluginLibraryInfo getFencePassPluginInfo() {
                 [](StringRef Name, FunctionPassManager &FPM,
                    ArrayRef<PassBuilder::PipelineElement>) {
                   if (Name == "FencePass") {
-                    FPM.addPass(AAEvaluator());
                     FPM.addPass(FencePass());
                     return true;
                   }

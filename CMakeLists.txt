@@ -18,8 +18,11 @@ if(NOT LLVM_ENABLE_RTTI)
 endif()
 
 add_library(FencePass SHARED FencePass.cpp)
+add_library(FencePassBaselineNaive SHARED FencePassBaselineNaive.cpp)
 
 # Allow undefined symbols in shared objects on Darwin (this is the default
 # behaviour on Linux)
 target_link_libraries(FencePass
+  "$<$<PLATFORM_ID:Darwin>:-undefined dynamic_lookup>")
+target_link_libraries(FencePassBaselineNaive
   "$<$<PLATFORM_ID:Darwin>:-undefined dynamic_lookup>")
