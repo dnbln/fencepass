@@ -134,7 +134,7 @@ namespace fencepass {
         CFPath &currentPath,
         BasicBlock *bb,
         BasicBlock::iterator bbIter,
-        bool fenceWithStore) {
+        const bool fenceWithStore) {
         if (bbIter == bb->end()) {
             for (const auto succ: successors(bb)) {
                 if (currentPath.visited_basic_blocks.find(succ) != currentPath.visited_basic_blocks.end()) {
@@ -194,7 +194,7 @@ namespace fencepass {
 
     Map runCFAnalysis(
         Function &F,
-        bool allowStoreStoreReordering,
+        const bool allowStoreStoreReordering,
         AAResults &alias_analysis_results) {
         Map map;
         for (auto &BB: F) {
