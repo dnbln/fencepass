@@ -121,6 +121,22 @@ namespace fencepass {
         return ptr;
     }
 
+    bool doCommitByAAResult(AliasResult result) {
+        bool doCommit = false;
+        switch (result) {
+            case AliasResult::NoAlias:
+            case AliasResult::MayAlias:
+            case AliasResult::PartialAlias:
+                doCommit = true;
+                break;
+            case AliasResult::MustAlias:
+                doCommit = false;
+                break;
+            default:
+                break;
+        }
+        return doCommit;
+    }
 
     void floodPaths(
         AAResults &alias_analysis_results,
@@ -157,16 +173,18 @@ namespace fencepass {
         }
 
         if (isMemoryAccess(I)) {
-            auto [kind, _] = memAccessFromInstruction(I);
+            auto [kind, newValue] = memAccessFromInstruction(I);
 
             switch (kind) {
                 case Load:
                 case AtomicRMW:
-                    map.commitPath(currentPath);
+                    if (doCommitByAAResult(alias_analysis_results.alias(initial_value, newValue)))
+                        map.commitPath(currentPath);
                     break;
                 case Store:
                     if (fenceWithStore) {
-                        map.commitPath(currentPath);
+                        if (doCommitByAAResult(alias_analysis_results.alias(initial_value, newValue)))
+                            map.commitPath(currentPath);
                     }
                     break;
             }
