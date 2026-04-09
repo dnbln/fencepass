@@ -18,17 +18,6 @@ namespace fencepass {
         Builder.CreateFence(AtomicOrdering::SequentiallyConsistent);
     }
 
-    void insertFenceAfter(Instruction &I) {
-        IRBuilder Builder(I.getContext());
-        Builder.SetInsertPoint(I.getNextNode());
-        Builder.CreateFence(AtomicOrdering::SequentiallyConsistent);
-    }
-
-    void fenceAround(Instruction &I) {
-        insertFenceBefore(I);
-        insertFenceAfter(I);
-    }
-
     bool isSeqFence(const Instruction &I) {
         if (I.getOpcode() != Instruction::Fence) return false;
         if (const auto *FI = dyn_cast<FenceInst>(&I)) {
