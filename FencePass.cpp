@@ -232,6 +232,8 @@ namespace fencepass {
                     fenceWithLoad = false;
                 }
 
+                if (!fenceWithLoad && !fenceWithStore) continue;
+
                 auto current = CFPath{{}, {}};
 
                 auto passedIt = it;
