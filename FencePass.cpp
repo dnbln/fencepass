@@ -155,61 +155,51 @@ namespace fencepass {
         BasicBlock::iterator bbIter,
         const bool fenceWithStore,
         const bool fenceWithLoad) {
-        if (bbIter == bb->end()) {
-            for (const auto succ: successors(bb)) {
-                if (currentPath.visited_basic_blocks.find(succ) != currentPath.visited_basic_blocks.end()) {
-                    // if we didnt find any conflicts the first time going through this block, we sure won't find any
-                    // conflicts going through it a second time.
-                    continue;
+        while (bbIter != bb->end()) {
+            auto &I = *bbIter;
+
+            if (isSeqFence(I)) {
+                return;
+            }
+
+            if (I.getOpcode() != Instruction::PHI) {
+                currentPath.path.emplace_back(&I);
+            }
+
+            if (isMemoryAccess(I)) {
+                switch (auto [kind, newValue] = memAccessFromInstruction(I); kind) {
+                    case Load:
+                    case AtomicRMW:
+                        if (fenceWithLoad
+                            && doCommitByAAResult(alias_analysis_results.alias(initial_value, newValue))) {
+                            map.commitPath(currentPath);
+                        }
+                        break;
+                    case Store:
+                        if (fenceWithStore
+                            && doCommitByAAResult(alias_analysis_results.alias(initial_value, newValue))) {
+                            map.commitPath(currentPath);
+                        }
+                        break;
                 }
-                CFPath cpClone = currentPath;
-                cpClone.visited_basic_blocks.insert(succ);
-                floodPaths(alias_analysis_results, initial_value, map, cpClone, succ, succ->begin(),
-                           fenceWithStore, fenceWithLoad);
-            }
-            return;
-        }
 
-        auto &I = *bbIter;
-
-        if (isSeqFence(I)) {
-            return;
-        }
-
-        if (I.getOpcode() != Instruction::PHI) {
-            currentPath.path.emplace_back(&I);
-        }
-
-        if (isMemoryAccess(I)) {
-            switch (auto [kind, newValue] = memAccessFromInstruction(I); kind) {
-                case Load:
-                case AtomicRMW:
-                    if (fenceWithLoad
-                        && doCommitByAAResult(alias_analysis_results.alias(initial_value, newValue))) {
-                        map.commitPath(currentPath);
-                    }
-                    break;
-                case Store:
-                    if (fenceWithStore
-                        && doCommitByAAResult(alias_analysis_results.alias(initial_value, newValue))) {
-                        map.commitPath(currentPath);
-                    }
-                    break;
+                return;
             }
 
-            return;
+            ++bbIter;
         }
 
-        ++bbIter;
-        floodPaths(
-            alias_analysis_results,
-            initial_value,
-            map,
-            currentPath,
-            bb,
-            bbIter,
-            fenceWithStore,
-            fenceWithLoad);
+        for (const auto succ: successors(bb)) {
+            if (currentPath.visited_basic_blocks.find(succ) != currentPath.visited_basic_blocks.end()) {
+                // if we didnt find any conflicts the first time going through this block, we sure won't find any
+                // conflicts going through it a second time.
+                continue;
+            }
+            CFPath cpClone = currentPath;
+            cpClone.visited_basic_blocks.insert(succ);
+            floodPaths(alias_analysis_results, initial_value, map, cpClone, succ, succ->begin(),
+                       fenceWithStore, fenceWithLoad);
+        }
     }
 
     Map runCFAnalysis(
@@ -255,8 +245,8 @@ namespace fencepass {
 
     // This method implements what the pass does
     bool visitor(Function &F,
-        FunctionAnalysisManager &FAM,
-        const bool allowStoreStoreReordering) {
+                 FunctionAnalysisManager &FAM,
+                 const bool allowStoreStoreReordering) {
         AAResults &results = FAM.getResult<AAManager>(F);
 
         const Map map = runCFAnalysis(F, allowStoreStoreReordering, results);
