@@ -71,20 +71,22 @@ namespace fencepass {
     };
 
     struct Map {
-        std::map<Instruction *, int> map;
+        int pathCount = 0;
+        std::map<Instruction *, std::set<int> > map;
 
-        void increment(Instruction *I) {
+        void increment(Instruction *I, int pathId) {
             if (map.find(I) == map.end()) {
-                map[I] = 1;
+                map[I] = {pathId};
             } else {
-                map[I]++;
+                map[I].insert(pathId);
             }
         }
 
         void commitPath(const CFPath &path) {
             for (const auto &I: path.path) {
-                increment(I);
+                increment(I, pathCount);
             }
+            pathCount++;
         }
     };
 
@@ -93,21 +95,38 @@ namespace fencepass {
 
         e << "Map: \n";
         for (const auto &[fst, snd]: map.map) {
-            e << "Before instruction : " << *fst << ", Count: " << snd << "\n";
+            e << "Before instruction : " << *fst << ", Count: " << snd.size() << "\n";
         }
     }
 
-    Instruction *fencePoint(const Map &map) {
-        Instruction *ptr = nullptr;
-        int mx = -1;
-        for (const auto &[fst, snd]: map.map) {
-            if (snd > mx) {
-                mx = snd;
-                ptr = fst;
+    std::set<Instruction *> fencePoints(const Map &map) {
+        std::set<int> solvedIds{};
+        std::set<Instruction *> points{};
+
+        for (int i = 0; i < map.pathCount; i++) {
+            Instruction *ptr = nullptr;
+            size_t mx = 0;
+            std::set<int> solvedDelta{};
+            for (const auto &[fst, snd]: map.map) {
+                std::set<int> unsolvedIds{};
+                std::set_difference(snd.begin(), snd.end(), solvedIds.begin(), solvedIds.end(),
+                                    std::inserter(unsolvedIds, unsolvedIds.begin()));
+                if (unsolvedIds.empty()) continue;
+
+                if (unsolvedIds.size() > mx) {
+                    mx = unsolvedIds.size();
+                    ptr = fst;
+                    solvedDelta = unsolvedIds;
+                }
             }
+
+            if (mx == 0) break;
+
+            points.insert(ptr);
+            solvedIds.insert(solvedDelta.begin(), solvedDelta.end());
         }
 
-        return ptr;
+        return points;
     }
 
     bool doCommitByAAResult(AliasResult result) {
@@ -143,11 +162,10 @@ namespace fencepass {
                     // conflicts going through it a second time.
                     continue;
                 }
-                currentPath.visited_basic_blocks.insert(succ);
                 CFPath cpClone = currentPath;
+                cpClone.visited_basic_blocks.insert(succ);
                 floodPaths(alias_analysis_results, initial_value, map, cpClone, succ, succ->begin(),
                            fenceWithStore, fenceWithLoad);
-                currentPath.visited_basic_blocks.erase(succ);
             }
             return;
         }
@@ -163,9 +181,7 @@ namespace fencepass {
         }
 
         if (isMemoryAccess(I)) {
-            auto [kind, newValue] = memAccessFromInstruction(I);
-
-            switch (kind) {
+            switch (auto [kind, newValue] = memAccessFromInstruction(I); kind) {
                 case Load:
                 case AtomicRMW:
                     if (fenceWithLoad
@@ -236,24 +252,20 @@ namespace fencepass {
     }
 
     // This method implements what the pass does
-    bool visitor(Function &F, FunctionAnalysisManager &FAM, bool allowStoreStoreReordering) {
+    bool visitor(Function &F,
+        FunctionAnalysisManager &FAM,
+        const bool allowStoreStoreReordering) {
         AAResults &results = FAM.getResult<AAManager>(F);
 
-        bool changed = false;
+        const Map map = runCFAnalysis(F, allowStoreStoreReordering, results);
 
-        while (true) {
-            Map bbfences = runCFAnalysis(F, allowStoreStoreReordering, results);
-
-            const auto fp = fencePoint(bbfences);
-
-            if (fp == nullptr) {
-                break;
-            }
-
+        const auto fps = fencePoints(map);
+        if (fps.empty())
+            return false;
+        for (const auto fp: fps) {
             insertFenceBefore(*fp);
-            changed = true;
         }
-        return changed;
+        return true;
     }
 
     // New PM implementation
