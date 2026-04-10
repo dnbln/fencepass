@@ -32,14 +32,18 @@ benchmarks/                    C programs used to evaluate the pass
   out/                         IR after the pass has run
 compare_passes.sh              counts how many fences each pass inserts
 perf_bench.sh                  measures CPU time for each benchmark variant
+bench_llvm.sh                  llvm-test-suite benchmark driver
+clang-pass-wrapper.sh          shared wrapper pipeline used by all benchmark modes
 ```
 
 ## Requirements
 
 - LLVM 20 (`opt-20`, `clang-20`)
-- CMake 3.20 or later
-- `perf` (for `perf_bench.sh`)
+- CMake 3.20 or later- `perf` (for `perf_bench.sh`)
 - `bc` (for the millisecond conversion in `perf_bench.sh`)
+- lit 18.8 or llvm-lit (to run the llvm test suite)
+
+For the llvm-test-suite benchmark flow, the test suite itself is also needed locally. The script looks in `./llvm-test-suite` by default, or in `TEST_SUITE_DIR` if set. The test-suite can be cloned from https://github.com/llvm/llvm-test-suite
 
 ## Building
 
@@ -84,3 +88,39 @@ Compiles each benchmark in five variants (baseline, TSO, PSO, Naive-TSO, Naive-P
 ## The naive baseline
 
 `FencePassBaselineNaive` is a simple reference implementation. It puts a fence before and after every single load and store, then removes any consecutive duplicate fences. It inserts far more fences than needed and serves as an upper bound to compare against.
+
+## The LLVM benchmarks and test-suite
+The LLVM test-suite has only been attempted on macOS, so the commands below are intended for macOS use.
+
+Clone the LLVM test-suite into the repo root, or set `TEST_SUITE_DIR` to an existing checkout:
+
+```bash
+git clone https://github.com/llvm/llvm-test-suite llvm-test-suite
+```
+Build the pass as described above.
+
+Then run the selected LLVM benchmarks with the wrapper-based pipeline:
+
+```bash
+CLANG_BIN=/path/to/llvm-project/build-clang/bin/clang \
+LLVM_INSTALL_DIR=/path/to/llvm-project/build-clang \
+LLVM_LIT_BIN=/opt/homebrew/bin/lit \
+BENCH_RUNS=1 \
+./bench_llvm.sh
+```
+This runs the selected test-suite benchmarks in four modes: `baseline`, `tso`, `pso`, and `naive`.
+Results are written to `test-suite-builds/<mode>/run-<n>/results.json`.
+
+Use 
+- `BENCH_RUNS` to change the number of repetitions and average the times over them.
+- `LLVM_SIZE_BIN` if `llvm-size` is not already on `PATH`
+
+The current benchmark set in `bench_llvm.sh` is:
+
+- `Treesort`
+- `richards_benchmark`
+- `oourafft`
+- `fbench`
+- `3mm`
+
+A table with the different compile times, execution times and linking times is generated.
